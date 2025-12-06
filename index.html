@@ -5,16 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Santa's Command Center 🎅</title>
     
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- PeerJS (P2P Networking) -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-    <!-- Confetti -->
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
     
     <style>
@@ -47,15 +42,7 @@
         transition: transform 0.1s;
       }
       .btn-primary:active { transform: translateY(4px); box-shadow: none; }
-      
-      .btn-secondary {
-        background: white;
-        color: #166534;
-        border: 2px solid #bbf7d0;
-        font-weight: bold;
-        padding: 1rem;
-        border-radius: 1rem;
-      }
+      .btn-primary:disabled { background: #fca5a5; box-shadow: none; cursor: not-allowed; }
 
       .animate-pop { animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
       @keyframes pop { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
@@ -79,31 +66,30 @@
       // --- ICONS ---
       const Icon = ({ name }) => {
         if (name === 'santa') return <span className="text-4xl">🎅</span>;
-        if (name === 'elf') return <span className="text-2xl">🧝</span>;
-        if (name === 'gift') return <span className="text-4xl">🎁</span>;
         if (name === 'back') return <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>;
+        if (name === 'eye') return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>;
+        if (name === 'gift') return <span className="text-4xl">🎁</span>;
         return null;
       };
 
       // --- MAIN APP ---
       const App = () => {
         const [view, setView] = useState('HOME'); 
-        // Views: HOME, ADMIN_LOGIN, HOST_LOBBY, GUEST_FORM, GUEST_LOBBY, GUEST_REVEAL
-
-        // Host Data
+        
+        // Host State
         const [roomCode, setRoomCode] = useState("");
         const [hostPeer, setHostPeer] = useState(null);
-        const [players, setPlayers] = useState([]); // Array of { id, name, wish }
+        const [players, setPlayers] = useState([]); 
         const [connections, setConnections] = useState([]);
+        const [isStartingHost, setIsStartingHost] = useState(false);
 
-        // Guest Data
-        const [guestPeer, setGuestPeer] = useState(null);
+        // Guest State
         const [guestName, setGuestName] = useState("");
         const [guestWish, setGuestWish] = useState("");
         const [myMatch, setMyMatch] = useState(null);
-        const [joinStatus, setJoinStatus] = useState(""); // "Connecting...", "Joined!"
+        const [joinStatus, setJoinStatus] = useState("");
 
-        // 1. Auto-detect Room Link
+        // 1. Check URL on Load
         useEffect(() => {
           const params = new URLSearchParams(window.location.search);
           const room = params.get('room');
@@ -114,25 +100,22 @@
         }, []);
 
         // --- HOST LOGIC ---
-
-        const startHost = () => {
+        const startHosting = () => {
+          setIsStartingHost(true);
           const code = generateRoomCode();
-          setRoomCode(code);
-          setView('HOST_LOBBY');
           
-          // Create Host Peer
+          // Initialize P2P
           const peer = new Peer(code, { debug: 1 });
           
           peer.on('open', (id) => {
-            console.log("Host is live with ID:", id);
+            console.log("Host Open:", id);
+            setRoomCode(code);
+            setIsStartingHost(false);
+            setView('HOST_LOBBY');
           });
 
           peer.on('connection', (conn) => {
-            // New Guest Connected!
-            console.log("New connection attempt...");
-            
             conn.on('open', () => {
-              console.log("Connection fully open.");
               setConnections(prev => [...prev, conn]);
               
               // 1. Send "WELCOME" handshake
@@ -140,15 +123,12 @@
 
               // 2. Listen for their data
               conn.on('data', (data) => {
-                console.log("Received data:", data);
                 if (data.type === 'JOIN_REQUEST') {
                   setPlayers(prev => {
-                    // Avoid duplicates
                     const exists = prev.find(p => p.id === conn.peer);
                     if (exists) return prev;
                     return [...prev, { id: conn.peer, name: data.name, wish: data.wish }];
                   });
-                  // Confirm back to guest
                   conn.send({ type: 'JOIN_CONFIRMED' });
                 }
               });
@@ -161,18 +141,19 @@
 
           peer.on('error', (err) => {
              console.error("Host Error:", err);
-             alert("Connection Error. Try refreshing.");
+             setIsStartingHost(false);
+             alert("Could not start party server. Try refreshing.");
           });
 
           setHostPeer(peer);
         };
 
         const stopHost = () => {
-          if (confirm("Close the room? Everyone will be disconnected.")) {
+          if (confirm("Close the room?")) {
              if (hostPeer) hostPeer.destroy();
              setPlayers([]);
              setView('HOME');
-             window.history.replaceState({}, '', window.location.pathname); // Clear URL
+             window.history.replaceState({}, '', window.location.pathname);
           }
         };
 
@@ -182,7 +163,6 @@
           let shuffled = [...players];
           let valid = false;
           
-          // Simple Derangement Loop
           for(let k=0; k<100; k++) {
             for(let i=shuffled.length-1; i>0; i--) {
               const j = Math.floor(Math.random()*(i+1));
@@ -195,18 +175,13 @@
             if (valid) break;
           }
 
-          if (!valid) return alert("Shuffle failed (someone got themselves). Add more people.");
+          if (!valid) return alert("Shuffle failed. Add more people.");
 
-          // Broadcast Matches
           players.forEach((p, i) => {
             const target = shuffled[i];
             const conn = connections.find(c => c.peer === p.id);
             if (conn) {
-              conn.send({ 
-                type: 'REVEAL', 
-                targetName: target.name, 
-                targetWish: target.wish 
-              });
+              conn.send({ type: 'REVEAL', targetName: target.name, targetWish: target.wish });
             }
           });
           
@@ -214,7 +189,6 @@
         };
 
         // --- GUEST LOGIC ---
-
         const joinRoom = (e) => {
           e.preventDefault();
           if (!guestName || !guestWish) return alert("Fill in the form!");
@@ -232,13 +206,8 @@
 
             conn.on('data', (data) => {
               if (data.type === 'WELCOME') {
-                // Host is ready, send my data
                 setJoinStatus("Sending Name...");
-                conn.send({ 
-                  type: 'JOIN_REQUEST', 
-                  name: guestName, 
-                  wish: guestWish 
-                });
+                conn.send({ type: 'JOIN_REQUEST', name: guestName, wish: guestWish });
               }
               if (data.type === 'JOIN_CONFIRMED') {
                 setJoinStatus("Joined!");
@@ -257,31 +226,26 @@
             });
           });
           
-          setGuestPeer(peer);
+          peer.on('error', (err) => {
+            alert("Connection error. Try refreshing.");
+            setJoinStatus("");
+          });
         };
-
 
         // --- UI COMPONENTS ---
 
-        // 1. HOME SCREEN
+        // 1. HOME
         if (view === 'HOME') {
           return (
             <div className="min-h-screen flex items-center justify-center p-4">
               <div className="snow-card max-w-sm w-full p-8 text-center space-y-6 animate-pop">
                 <Icon name="santa" />
                 <h1 className="font-christmas text-5xl text-red-700">Santa's Party</h1>
-                <p className="text-gray-500">Real-time Secret Santa</p>
-                <button onClick={() => setView('ADMIN_LOGIN')} className="btn-primary w-full">Create Party (Admin)</button>
-                
+                <button onClick={() => setView('ADMIN_LOGIN')} className="btn-primary w-full">Start Party (Admin)</button>
                 <div className="border-t border-red-100 pt-4 mt-4">
                    <p className="text-xs text-red-300 mb-2 font-bold uppercase">Joining a party?</p>
                    <form onSubmit={(e) => { e.preventDefault(); setView('GUEST_FORM'); }} className="flex gap-2">
-                     <input 
-                        value={roomCode} onChange={e => setRoomCode(e.target.value.toUpperCase())}
-                        placeholder="CODE"
-                        className="w-24 text-center border-2 border-red-200 rounded-lg outline-none font-bold text-red-800"
-                        maxLength={4}
-                     />
+                     <input value={roomCode} onChange={e => setRoomCode(e.target.value.toUpperCase())} placeholder="CODE" className="w-24 text-center border-2 border-red-200 rounded-lg outline-none font-bold text-red-800" maxLength={4} />
                      <button className="bg-white border-2 border-red-500 text-red-500 font-bold rounded-lg px-4 flex-1">Join</button>
                    </form>
                 </div>
@@ -290,65 +254,76 @@
           );
         }
 
-        // 2. ADMIN LOGIN
+        // 2. ADMIN LOGIN (FIXED)
         if (view === 'ADMIN_LOGIN') {
           const [pass, setPass] = useState("");
+          const [showPass, setShowPass] = useState(false);
+          const [error, setError] = useState("");
+
           const check = (e) => {
             e.preventDefault();
-            if (pass.toLowerCase() === ADMIN_PASSCODE) startHost();
-            else alert("Wrong passcode!");
+            setError("");
+            if (pass.trim().toLowerCase() === ADMIN_PASSCODE) {
+              startHosting();
+            } else {
+              setError("Wrong passcode! Try 'butts'");
+            }
           }
+
           return (
             <div className="min-h-screen flex items-center justify-center p-4">
                <div className="snow-card max-w-sm w-full p-8 text-center space-y-4 animate-pop">
                  <button onClick={() => setView('HOME')} className="absolute top-4 left-4 text-gray-400"><Icon name="back"/></button>
                  <h2 className="font-christmas text-3xl">Admin Login</h2>
                  <form onSubmit={check} className="space-y-4">
-                   <input type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="Passcode" className="w-full p-3 border-2 border-red-100 rounded-xl text-center outline-none" autoFocus />
-                   <button className="btn-primary w-full">Unlock</button>
+                   <div className="relative">
+                     <input 
+                       type={showPass ? "text" : "password"} 
+                       value={pass} 
+                       onChange={e => setPass(e.target.value)} 
+                       placeholder="Enter Passcode" 
+                       className="w-full p-3 border-2 border-red-100 rounded-xl text-center outline-none focus:border-red-400" 
+                       autoFocus 
+                     />
+                     <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-3 top-3 text-gray-400">
+                       <Icon name="eye" />
+                     </button>
+                   </div>
+                   {error && <p className="text-red-500 text-xs font-bold">{error}</p>}
+                   
+                   <button disabled={isStartingHost} className="btn-primary w-full flex justify-center">
+                     {isStartingHost ? "Starting Server..." : "Unlock Party"}
+                   </button>
                  </form>
                </div>
             </div>
           );
         }
 
-        // 3. HOST LOBBY (The Admin Dashboard)
+        // 3. HOST LOBBY
         if (view === 'HOST_LOBBY') {
           const url = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
           return (
             <div className="min-h-screen p-4 pb-32 max-w-lg mx-auto">
               <div className="flex justify-between items-center mb-6 pt-4">
-                 <button onClick={stopHost} className="text-red-400 hover:text-red-600 font-bold text-sm flex items-center gap-1">
-                   <Icon name="back" /> Close Room
-                 </button>
-                 <div className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-bold border border-yellow-300">
-                   CODE: {roomCode}
-                 </div>
+                 <button onClick={stopHost} className="text-red-400 font-bold text-sm flex items-center gap-1"><Icon name="back" /> Close</button>
+                 <div className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-bold border border-yellow-300">CODE: {roomCode}</div>
               </div>
-
               <div className="text-center mb-6">
                 <h1 className="font-christmas text-4xl text-red-800">Santa's Dashboard</h1>
                 <p className="text-red-400 text-xs mt-1">Keep this screen open!</p>
               </div>
-
-              {/* Invite Card */}
               <div className="bg-white p-4 rounded-xl border-2 border-green-200 mb-6 text-center">
                 <p className="text-xs font-bold text-green-700 uppercase mb-2">Invite Link</p>
-                <button 
-                  onClick={() => { navigator.clipboard.writeText(url); alert("Link Copied!"); }}
-                  className="bg-green-50 text-green-800 font-mono text-xs p-3 rounded-lg w-full break-all border border-green-200 hover:bg-green-100"
-                >
+                <button onClick={() => { navigator.clipboard.writeText(url); alert("Link Copied!"); }} className="bg-green-50 text-green-800 font-mono text-xs p-3 rounded-lg w-full break-all border border-green-200">
                   {url} <br/> <span className="font-bold block mt-2">(Tap to Copy)</span>
                 </button>
               </div>
-
-              {/* Real-time List */}
               <div className="space-y-3">
                  <div className="flex justify-between px-2 text-xs font-bold text-gray-400 uppercase">
                    <span>Friends ({players.length})</span>
-                   {players.length === 0 && <span className="animate-pulse text-red-400">Waiting for connections...</span>}
+                   {players.length === 0 && <span className="animate-pulse text-red-400">Waiting...</span>}
                  </div>
-                 
                  {players.map((p) => (
                    <div key={p.id} className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-red-500 flex justify-between items-center animate-pop">
                      <div>
@@ -359,7 +334,6 @@
                    </div>
                  ))}
               </div>
-
               {players.length > 1 && (
                 <div className="fixed bottom-6 left-4 right-4 max-w-lg mx-auto">
                    <button onClick={shuffleAndSend} className="btn-primary w-full text-xl shadow-xl flex items-center justify-center gap-2">
@@ -380,15 +354,15 @@
                   <span className="bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded">ROOM {roomCode}</span>
                   <h1 className="font-christmas text-4xl text-green-900 mt-2">Join Party</h1>
                 </div>
-                
+                {!roomCode && <input value={roomCode} onChange={e => setRoomCode(e.target.value.toUpperCase())} placeholder="CODE" className="w-full text-center p-3 border-2 border-red-100 rounded-lg mb-4 font-bold" maxLength={4} />}
                 <form onSubmit={joinRoom} className="space-y-4">
                   <div>
                     <label className="text-xs font-bold text-gray-400 uppercase">Your Name</label>
-                    <input value={guestName} onChange={e => setGuestName(e.target.value)} className="w-full p-3 border-2 border-green-100 rounded-lg outline-none focus:border-green-500 font-bold" placeholder="e.g. Buddy" />
+                    <input value={guestName} onChange={e => setGuestName(e.target.value)} className="w-full p-3 border-2 border-green-100 rounded-lg outline-none font-bold" placeholder="e.g. Buddy" />
                   </div>
                   <div>
                     <label className="text-xs font-bold text-gray-400 uppercase">Weird Fact / Wish</label>
-                    <input value={guestWish} onChange={e => setGuestWish(e.target.value)} className="w-full p-3 border-2 border-green-100 rounded-lg outline-none focus:border-green-500" placeholder="e.g. I like socks" />
+                    <input value={guestWish} onChange={e => setGuestWish(e.target.value)} className="w-full p-3 border-2 border-green-100 rounded-lg outline-none" placeholder="e.g. I like socks" />
                   </div>
                   <button disabled={!!joinStatus} className="btn-primary w-full bg-green-600 shadow-green-800 border-green-800">
                     {joinStatus || "Join Now"}
@@ -399,17 +373,16 @@
           );
         }
 
-        // 5. GUEST LOBBY (Waiting Room)
+        // 5. GUEST LOBBY
         if (view === 'GUEST_LOBBY') {
           return (
              <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center animate-pop">
                <div className="text-6xl animate-bounce mb-4">⏳</div>
                <h2 className="font-christmas text-4xl text-green-900 mb-2">You're In!</h2>
-               <p className="text-green-700 font-medium mb-8">Waiting for the host to shuffle...</p>
-               
+               <p className="text-green-700 font-medium mb-8">Waiting for Santa (Admin) to shuffle...</p>
                <div className="bg-white p-4 rounded-xl border border-gray-200 text-sm text-gray-500 max-w-xs shadow-sm">
                  <p className="font-bold text-red-500 mb-1">⚠️ Do not close!</p>
-                 Keep this screen open or you will lose your spot in the circle.
+                 Keep this screen open or you will lose your spot.
                </div>
              </div>
           );
@@ -422,9 +395,8 @@
             <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center animate-pop">
                <h1 className="font-christmas text-5xl text-red-600 mb-2">Secret Santa</h1>
                <p className="text-gray-400 font-bold text-xs uppercase tracking-widest mb-8">Mission Assigned</p>
-               
                {!open ? (
-                 <button onClick={() => { setOpen(true); window.confetti(); }} className="w-64 h-64 rounded-full bg-red-600 shadow-2xl flex flex-col items-center justify-center text-white border-4 border-red-400 hover:scale-105 transition active:scale-95">
+                 <button onClick={() => { setOpen(true); window.confetti({ particleCount: 200, spread: 80 }); }} className="w-64 h-64 rounded-full bg-red-600 shadow-2xl flex flex-col items-center justify-center text-white border-4 border-red-400 hover:scale-105 transition active:scale-95">
                    <div className="animate-bounce mb-2"><Icon name="gift"/></div>
                    <span className="font-christmas text-3xl">OPEN</span>
                  </button>
@@ -433,7 +405,7 @@
                    <p className="text-xs font-bold text-gray-400 uppercase mb-4">You are buying for</p>
                    <div className="text-5xl font-christmas text-green-900 mb-6">{myMatch.name}</div>
                    <div className="bg-green-50 p-4 rounded-xl border border-green-100 text-green-800">
-                     <p className="text-xs font-bold uppercase opacity-50 mb-1">Their Wish/Fact</p>
+                     <p className="text-xs font-bold uppercase opacity-50 mb-1">Their Hint</p>
                      "{myMatch.wish}"
                    </div>
                    <p className="text-xs text-gray-400 mt-6 italic">Screenshot this now!</p>
