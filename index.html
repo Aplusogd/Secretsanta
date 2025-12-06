@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Santa's Party 🎄</title>
+    <title>Santa's Christmas Party 🎄</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -17,55 +17,63 @@
       
       body {
         font-family: 'Quicksand', sans-serif;
-        background-color: #fff1f2;
-        color: #881337;
+        background-color: #f0fdf4; /* Mint */
+        background-image: repeating-linear-gradient(45deg, #dcfce7 25%, transparent 25%, transparent 75%, #dcfce7 75%, #dcfce7), repeating-linear-gradient(45deg, #dcfce7 25%, #f0fdf4 25%, #f0fdf4 75%, #dcfce7 75%, #dcfce7);
+        background-position: 0 0, 20px 20px;
+        background-size: 40px 40px;
+        color: #14532d;
         min-height: 100vh;
         overflow: hidden;
-        touch-action: manipulation;
       }
       
       .font-fun { font-family: 'Chewy', cursive; }
       
-      .cute-card {
-        background: white;
-        border: 4px solid #fecdd3;
-        box-shadow: 8px 8px 0px #fb7185;
+      .snow-card {
+        background: rgba(255, 255, 255, 0.95);
+        border: 4px solid #ffffff;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.1);
         border-radius: 2rem;
       }
-      
-      .btn-mega {
-        background: #f43f5e;
+
+      .btn-christmas {
+        background: linear-gradient(to bottom, #ef4444, #dc2626);
         color: white;
         font-family: 'Chewy', cursive;
         font-size: 1.5rem;
-        padding: 1.25rem;
+        padding: 1rem;
         border-radius: 1.5rem;
-        border: 2px solid white;
-        box-shadow: 0 6px 0 #9f1239;
+        border: 4px solid #fecaca;
+        box-shadow: 0 6px 0 #991b1b;
         transition: all 0.1s;
         width: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
+        text-shadow: 1px 1px 0 #991b1b;
       }
-      .btn-mega:active { transform: translateY(6px); box-shadow: none; }
-      .btn-mega:disabled { 
-        background: #e5e7eb; 
-        color: #9ca3af; 
-        box-shadow: none; 
-        border-color: #f3f4f6;
-        cursor: not-allowed; 
-        transform: none; 
-      }
+      .btn-christmas:active { transform: translateY(6px); box-shadow: none; }
+      .btn-christmas:disabled { background: #d1d5db; border-color: #e5e7eb; box-shadow: none; cursor: not-allowed; }
 
+      /* Gift Shake Animation */
+      @keyframes shake {
+        0% { transform: translate(1px, 1px) rotate(0deg); }
+        10% { transform: translate(-1px, -2px) rotate(-1deg); }
+        20% { transform: translate(-3px, 0px) rotate(1deg); }
+        30% { transform: translate(3px, 2px) rotate(0deg); }
+        40% { transform: translate(1px, -1px) rotate(1deg); }
+        50% { transform: translate(-1px, 2px) rotate(-1deg); }
+        60% { transform: translate(-3px, 1px) rotate(0deg); }
+        70% { transform: translate(3px, 1px) rotate(-1deg); }
+        80% { transform: translate(-1px, -1px) rotate(1deg); }
+        90% { transform: translate(1px, 2px) rotate(0deg); }
+        100% { transform: translate(1px, -2px) rotate(-1deg); }
+      }
+      .shake-gift { animation: shake 0.5s; animation-iteration-count: infinite; }
+
+      .animate-float { animation: float 3s ease-in-out infinite; }
+      @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0px); } }
+      
       .animate-pop { animation: pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
       @keyframes pop { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
       .scroller { -webkit-overflow-scrolling: touch; }
-      .scroller::-webkit-scrollbar { width: 6px; }
-      .scroller::-webkit-scrollbar-track { background: #fff1f2; }
-      .scroller::-webkit-scrollbar-thumb { background: #fda4af; border-radius: 10px; }
     </style>
   </head>
   <body>
@@ -76,61 +84,46 @@
 
       // --- HELPERS ---
       const randomCode = () => {
-        const adjs = ['JOY', 'HOLLY', 'SNOW', 'GIFT', 'STAR'];
+        const adjs = ['JOY', 'SNOW', 'GIFT', 'STAR', 'NOEL'];
         const nums = Math.floor(Math.random() * 90 + 10);
         return adjs[Math.floor(Math.random()*adjs.length)] + "-" + nums;
       };
 
       // --- MAIN APP ---
       const App = () => {
-        const [view, setView] = useState('LOADING'); 
+        const [view, setView] = useState('HOME'); // HOME, HOST_LOBBY, GUEST_JOIN, GUEST_WAITING, GUEST_REVEAL
         
-        // Host State
+        // Host Data
         const [roomCode, setRoomCode] = useState("");
         const [players, setPlayers] = useState([]);
         const [hostStatus, setHostStatus] = useState("Offline");
+        const [isShuffling, setIsShuffling] = useState(false);
         
-        // Guest State
+        // Guest Data
         const [guestName, setGuestName] = useState("");
         const [guestWish, setGuestWish] = useState("");
         const [myMatch, setMyMatch] = useState(null);
         
-        // Peer Persistence
         const peerRef = useRef(null);
         const connsRef = useRef([]);
 
-        // 1. APP STARTUP & RESTORE
+        // 1. STARTUP LOGIC
         useEffect(() => {
           const params = new URLSearchParams(window.location.search);
-          const urlParty = params.get('party');
+          const partyCode = params.get('party');
           
-          // Check Local Storage
-          const savedHost = localStorage.getItem('santa_host'); // { code }
-          const savedGuest = localStorage.getItem('santa_guest'); // { name, wish, code }
-          const savedMatch = localStorage.getItem('santa_match'); // { name, wish }
+          // Check Local Storage for restoration
+          const savedMatch = localStorage.getItem('santa_match');
+          const savedHost = localStorage.getItem('santa_host_code');
 
           if (savedMatch) {
-            // Priority 1: Already matched? Show Reveal!
             setMyMatch(JSON.parse(savedMatch));
             setView('GUEST_REVEAL');
-          } else if (savedGuest) {
-            // Priority 2: Was waiting? Reconnect!
-            const g = JSON.parse(savedGuest);
-            setGuestName(g.name);
-            setGuestWish(g.wish);
-            setRoomCode(g.code);
-            connectGuest(g.code, g.name, g.wish);
-          } else if (urlParty) {
-            // Priority 3: Joining new link
-            setRoomCode(urlParty);
+          } else if (partyCode) {
+            setRoomCode(partyCode);
             setView('GUEST_JOIN');
           } else if (savedHost) {
-            // Priority 4: Was hosting? Restore!
-            const h = JSON.parse(savedHost);
-            initHost(h.code);
-          } else {
-            // Priority 5: New User
-            setView('HOME');
+            initHost(savedHost);
           }
         }, []);
 
@@ -138,7 +131,7 @@
         const initHost = (codeToUse) => {
           const code = codeToUse || randomCode();
           setRoomCode(code);
-          localStorage.setItem('santa_host', JSON.stringify({ code }));
+          localStorage.setItem('santa_host_code', code);
           setView('HOST_LOBBY');
           setHostStatus("Connecting...");
 
@@ -148,7 +141,7 @@
           peerRef.current = peer;
 
           peer.on('open', (id) => {
-            console.log("Host Online:", id);
+            console.log("Host Open:", id);
             setHostStatus("Online");
           });
 
@@ -175,9 +168,8 @@
           });
 
           peer.on('error', (err) => {
-            if (err.type === 'unavailable-id') setTimeout(() => initHost(code), 1000); 
+             if (err.type === 'unavailable-id') setTimeout(() => initHost(code), 1000);
           });
-          
           peer.on('disconnected', () => peer.reconnect());
         };
 
@@ -185,16 +177,27 @@
           if(confirm("End the party?")) {
             localStorage.clear();
             if (peerRef.current) peerRef.current.destroy();
-            window.location.href = window.location.pathname; 
+            window.location.href = window.location.pathname;
           }
         };
 
-        const shuffleAndSend = () => {
-          if (players.length < 2) return alert("Need 2+ people!");
+        const handleShufflePress = () => {
+          if (players.length < 2) return alert("Need at least 2 elves!");
           
+          setIsShuffling(true);
+          
+          // Fake Shuffle Animation Delay
+          setTimeout(() => {
+            performShuffleAndSend();
+            setIsShuffling(false);
+          }, 3000);
+        };
+
+        const performShuffleAndSend = () => {
           let shuffled = [...players];
           let valid = false;
           
+          // Derangement Shuffle
           for(let k=0; k<100; k++) {
             for(let i=shuffled.length-1; i>0; i--) {
               const j = Math.floor(Math.random()*(i+1));
@@ -204,85 +207,77 @@
             for(let i=0; i<players.length; i++) {
               if (players[i].id === shuffled[i].id) { valid = false; break; }
             }
-            if(valid) break;
+            if (valid) break;
           }
 
-          if(!valid) return alert("Shuffle failed. Add more people!");
+          if (!valid) return alert("Shuffle failed. Try again!");
 
+          // Send to Guests
           players.forEach((p, i) => {
             const match = shuffled[i];
             const conn = connsRef.current.find(c => c.peer === p.id);
-            if(conn) conn.send({ type: 'MATCH', name: match.name, wish: match.wish });
+            if (conn) {
+              conn.send({ type: 'MATCH', name: match.name, wish: match.wish });
+            }
           });
-          alert("Sent! 🎁");
+          
+          alert("🎅 Sent! Tell everyone to check their screens!");
         };
 
         // --- GUEST LOGIC ---
-        const handleJoinSubmit = (e) => {
+        const handleGuestJoin = (e) => {
           e.preventDefault();
           if(!guestName || !guestWish) return alert("Fill in the blanks!");
-          
-          // Save state immediately
-          localStorage.setItem('santa_guest', JSON.stringify({ name: guestName, wish: guestWish, code: roomCode }));
-          
-          connectGuest(roomCode, guestName, guestWish);
-        };
-
-        const connectGuest = (code, name, wish) => {
           setView('GUEST_WAITING');
-          
-          if (peerRef.current) peerRef.current.destroy();
-          
-          const peer = new Peer(null, { debug: 1 });
-          peerRef.current = peer;
-
-          peer.on('open', () => {
-            const hostId = code.replace('-', '');
-            const conn = peer.connect(hostId);
-            
-            conn.on('open', () => {
-               // Wait for Host handshake
-            });
-
-            conn.on('data', (data) => {
-              if (data.type === 'HELLO') {
-                conn.send({ type: 'JOIN', name: name, wish: wish });
-              }
-              if (data.type === 'MATCH') {
-                localStorage.setItem('santa_match', JSON.stringify(data)); // Save match forever
-                setMyMatch(data);
-                setView('GUEST_REVEAL');
-              }
-            });
-
-            conn.on('close', () => console.log("Host disconnected"));
-            conn.on('error', () => setTimeout(() => connectGuest(code, name, wish), 2000));
-          });
+          connectGuest();
         };
 
-        const resetGuest = () => {
-           if(confirm("Leave the party?")) {
-             localStorage.clear();
-             window.location.href = window.location.pathname;
-           }
+        const connectGuest = () => {
+          if (!peerRef.current) {
+            peerRef.current = new Peer(null, { debug: 1 });
+            peerRef.current.on('open', () => tryConnectHost());
+          } else {
+            tryConnectHost();
+          }
+        };
+
+        const tryConnectHost = () => {
+          const hostId = roomCode.replace('-', '');
+          const conn = peerRef.current.connect(hostId);
+          
+          conn.on('open', () => {
+             // Wait for handshake
+          });
+
+          conn.on('data', (data) => {
+            if (data.type === 'HELLO') {
+              conn.send({ type: 'JOIN', name: guestName, wish: guestWish });
+            }
+            if (data.type === 'MATCH') {
+              localStorage.setItem('santa_match', JSON.stringify(data));
+              setMyMatch(data);
+              setView('GUEST_REVEAL');
+              window.confetti();
+            }
+          });
+          
+          conn.on('error', () => setTimeout(tryConnectHost, 2000));
         };
 
         // --- VIEWS ---
-
-        if (view === 'LOADING') return <div className="h-screen flex items-center justify-center text-2xl font-fun text-pink-500 animate-bounce">Loading...</div>;
 
         // 1. HOME
         if (view === 'HOME') {
           return (
             <div className="h-screen flex items-center justify-center p-4">
-              <div className="cute-card w-full max-w-sm p-8 text-center space-y-8 animate-pop">
-                <div className="text-6xl animate-bounce">🎅</div>
-                <h1 className="font-fun text-5xl text-pink-600">Secret Santa</h1>
-                <button onClick={() => initHost(null)} className="btn-mega w-full bg-red-500">Start Party</button>
-                <div className="relative py-2 text-center text-xs text-pink-300 font-bold">OR JOIN</div>
+              <div className="snow-card w-full max-w-sm p-8 text-center space-y-8 animate-pop">
+                <div className="text-6xl animate-float">🎅</div>
+                <h1 className="font-fun text-5xl text-red-600">Secret Santa</h1>
+                <button onClick={() => initHost(null)} className="btn-christmas">Start Party</button>
+                <div className="text-xs text-green-600 font-bold uppercase tracking-widest">OR JOIN</div>
                 <form onSubmit={(e) => { e.preventDefault(); setView('GUEST_JOIN'); }} className="flex gap-2">
-                  <input value={roomCode} onChange={e => setRoomCode(e.target.value.toUpperCase())} placeholder="CODE" className="w-24 text-center border-2 border-pink-200 rounded-xl outline-none font-bold text-pink-500 p-2" />
-                  <button className="flex-1 bg-white border-2 border-pink-400 text-pink-500 font-bold rounded-xl">Join</button>
+                  <input value={roomCode} onChange={e => setRoomCode(e.target.value.toUpperCase())} placeholder="CODE" className="w-24 text-center border-2 border-red-200 rounded-xl outline-none font-bold text-red-600 p-2" />
+                  <button className="flex-1 bg-white border-2 border-red-400 text-red-500 font-bold rounded-xl">Join</button>
                 </form>
               </div>
             </div>
@@ -294,17 +289,17 @@
           const shareUrl = `${window.location.origin}${window.location.pathname}?party=${roomCode}`;
           return (
             <div className="fixed inset-0 flex flex-col bg-white">
-              <div className="pt-6 pb-2 px-4 text-center bg-pink-50 border-b-2 border-pink-100 shadow-sm z-10">
+              <div className="pt-6 pb-2 px-4 text-center bg-red-50 border-b-2 border-red-100 shadow-sm z-10">
                 <div className="inline-block bg-yellow-300 text-yellow-900 px-4 py-1 rounded-full font-fun text-xl transform -rotate-1 shadow-sm mb-2">
                   Code: {roomCode}
                 </div>
                 <div className="flex gap-2 justify-center">
-                  <button onClick={() => { navigator.clipboard.writeText(shareUrl); alert("Copied!"); }} className="bg-white text-pink-600 px-4 py-2 rounded-xl border-2 border-pink-200 font-bold text-xs shadow-sm active:scale-95">🔗 Copy Link</button>
-                  <button onClick={resetHost} className="bg-white text-red-400 px-4 py-2 rounded-xl border-2 border-red-100 font-bold text-xs shadow-sm active:scale-95">❌ End</button>
+                  <button onClick={() => { navigator.clipboard.writeText(shareUrl); alert("Copied!"); }} className="bg-white text-red-600 px-4 py-2 rounded-xl border-2 border-red-200 font-bold text-xs shadow-sm active:scale-95">🔗 Copy Link</button>
+                  <button onClick={resetHost} className="bg-white text-gray-400 px-4 py-2 rounded-xl border-2 border-gray-200 font-bold text-xs shadow-sm active:scale-95">❌ End</button>
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto scroller p-4 bg-white">
-                <h3 className="font-bold text-pink-800 mb-3 px-2">Elves: {players.length}</h3>
+                <h3 className="font-bold text-red-800 mb-3 px-2">Elves Joined: {players.length}</h3>
                 <div className="space-y-3 pb-24">
                   {players.map(p => (
                     <div key={p.id} className="bg-white border-2 border-green-200 p-4 rounded-2xl flex items-center justify-between shadow-sm animate-pop">
@@ -315,13 +310,13 @@
                       <div className="text-2xl shrink-0">🧝</div>
                     </div>
                   ))}
-                  {players.length === 0 && <div className="text-center py-10 text-pink-300 font-bold animate-pulse">Waiting for family...</div>}
+                  {players.length === 0 && <div className="text-center py-10 text-red-300 font-bold animate-pulse">Waiting for family...</div>}
                 </div>
               </div>
-              <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/90 backdrop-blur border-t border-pink-100 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-50">
+              <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/90 backdrop-blur border-t border-red-100 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-50">
                 <div className="max-w-lg mx-auto">
-                  <button onClick={shuffleAndSend} disabled={players.length < 2} className="btn-mega w-full bg-green-500 hover:bg-green-600 shadow-[0_6px_0_#15803d]">
-                    {players.length < 2 ? "Waiting..." : "SHUFFLE & SEND! 🚀"}
+                  <button onClick={handleShufflePress} disabled={players.length < 2 || isShuffling} className="btn-christmas">
+                    {isShuffling ? "Shuffling..." : "SHUFFLE & SEND! 🚀"}
                   </button>
                 </div>
               </div>
@@ -333,16 +328,16 @@
         if (view === 'GUEST_JOIN') {
           return (
             <div className="h-screen flex items-center justify-center p-4">
-              <div className="cute-card w-full max-w-sm p-8 animate-pop">
+              <div className="snow-card w-full max-w-sm p-8 animate-pop">
                 <div className="text-center mb-6">
-                  <span className="bg-yellow-200 text-yellow-800 px-3 py-1 rounded-full text-xs font-bold">ROOM: {roomCode}</span>
-                  <h1 className="font-fun text-4xl text-pink-600 mt-2">Join In!</h1>
+                  <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-bold">ROOM: {roomCode}</span>
+                  <h1 className="font-fun text-4xl text-green-600 mt-2">Join In!</h1>
                 </div>
-                {!roomCode && <input value={roomCode} onChange={e => setRoomCode(e.target.value.toUpperCase())} placeholder="CODE" className="w-full text-center p-3 border-2 border-pink-200 rounded-xl mb-4 font-bold" />}
-                <form onSubmit={handleJoinSubmit} className="space-y-4">
-                  <div><label className="text-xs font-bold text-pink-400 uppercase ml-1">Your Name</label><input value={guestName} onChange={e => setGuestName(e.target.value)} className="w-full p-4 border-2 border-pink-200 rounded-xl outline-none focus:border-pink-500 font-bold text-lg text-pink-600" placeholder="e.g. Grandma" /></div>
-                  <div><label className="text-xs font-bold text-pink-400 uppercase ml-1">Wishlist 🎁</label><input value={guestWish} onChange={e => setGuestWish(e.target.value)} className="w-full p-4 border-2 border-pink-200 rounded-xl outline-none focus:border-pink-500 text-pink-600" placeholder="e.g. Socks" /></div>
-                  <button className="btn-mega w-full bg-pink-500 mt-4">I'm Ready!</button>
+                {!roomCode && <input value={roomCode} onChange={e => setRoomCode(e.target.value.toUpperCase())} placeholder="CODE" className="w-full text-center p-3 border-2 border-green-200 rounded-xl mb-4 font-bold" />}
+                <form onSubmit={handleGuestJoin} className="space-y-4">
+                  <div><label className="text-xs font-bold text-green-600 uppercase ml-1">My Name</label><input value={guestName} onChange={e => setGuestName(e.target.value)} className="w-full p-4 border-2 border-green-200 rounded-xl outline-none focus:border-green-500 font-bold text-lg text-green-800" placeholder="Name" /></div>
+                  <div><label className="text-xs font-bold text-green-600 uppercase ml-1">Wishlist 🎁</label><input value={guestWish} onChange={e => setGuestWish(e.target.value)} className="w-full p-4 border-2 border-green-200 rounded-xl outline-none focus:border-green-500 text-green-800" placeholder="Socks, Toys..." /></div>
+                  <button className="btn-christmas">I'm Ready!</button>
                 </form>
               </div>
             </div>
@@ -352,63 +347,82 @@
         // 4. WAITING
         if (view === 'GUEST_WAITING') {
           return (
-            <div className="h-screen flex flex-col items-center justify-center p-6 text-center animate-pop bg-green-50">
-              <div className="text-6xl animate-bounce mb-6">🎄</div>
-              <h2 className="font-fun text-4xl text-pink-600 mb-2">You're In!</h2>
-              <p className="text-pink-800 font-bold text-lg">Waiting for Santa...</p>
-              <div className="mt-8 bg-white p-4 rounded-xl border-2 border-pink-100 text-sm text-pink-400 max-w-xs shadow-sm">
-                Don't close your phone! Wait for the host to press the button.
+            <div className="h-screen flex flex-col items-center justify-center p-6 text-center animate-pop bg-red-50">
+              <div className="text-6xl animate-bounce mb-6">🍪</div>
+              <h2 className="font-fun text-4xl text-red-600 mb-2">You're In!</h2>
+              <p className="text-red-800 font-bold text-lg mb-8">Waiting for Santa...</p>
+              <div className="bg-white p-4 rounded-xl border-2 border-red-100 text-sm text-red-400 max-w-xs shadow-sm">
+                If your phone went to sleep, click below to check for matches.
               </div>
-              <button onClick={resetGuest} className="mt-8 text-xs text-red-300 underline">Leave Party</button>
+              <button onClick={connectGuest} className="mt-4 text-red-600 font-bold underline">Check for Mail 🔄</button>
             </div>
           );
         }
 
-        // 5. REVEAL
+        // 5. REVEAL (THE CHRISTMAS MIRACLE)
         if (view === 'GUEST_REVEAL') {
-          const [step, setStep] = useState('CLOSED'); 
+          const [phase, setPhase] = useState('BOX'); // BOX, COUNTDOWN, CARD
           const [count, setCount] = useState(3);
 
-          const startReveal = () => {
-            setStep('COUNTDOWN');
+          const openGift = () => {
+            setPhase('COUNTDOWN');
             let c = 3;
             const timer = setInterval(() => {
               c--;
               setCount(c);
               if (c === 0) {
                 clearInterval(timer);
-                setStep('OPEN');
-                window.confetti({ particleCount: 500, spread: 120, startVelocity: 40 });
+                setPhase('CARD');
+                window.confetti({ particleCount: 500, spread: 150, startVelocity: 60 });
               }
             }, 1000);
           };
 
-          if (step === 'COUNTDOWN') return <div className="h-screen flex items-center justify-center bg-red-500"><h1 className="font-fun text-[10rem] text-white animate-pulse">{count}</h1></div>;
-
-          if (step === 'OPEN') {
+          if (phase === 'BOX') {
             return (
-              <div className="h-screen flex flex-col items-center justify-center p-4 bg-green-50 animate-pop text-center">
-                <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-6">You are buying for</p>
-                <div className="text-6xl font-fun text-red-600 mb-8 drop-shadow-sm">{myMatch.name}</div>
-                <div className="bg-white p-8 rounded-3xl border-4 border-red-200 text-green-800 shadow-xl w-full max-w-sm transform rotate-1">
-                  <p className="text-xs font-bold uppercase opacity-50 mb-2">They asked for</p>
-                  <p className="text-2xl font-bold font-fun">"{myMatch.wish}"</p>
+              <div className="h-screen flex flex-col items-center justify-center p-4 text-center bg-green-50">
+                <h1 className="font-fun text-5xl text-red-600 mb-4">You have a gift!</h1>
+                <p className="text-green-600 font-bold uppercase tracking-widest mb-10 animate-pulse">Tap to Open</p>
+                <div onClick={openGift} className="cursor-pointer shake-gift">
+                  <div className="w-64 h-64 bg-red-600 rounded-3xl shadow-xl relative border-4 border-red-800 flex items-center justify-center">
+                    <div className="absolute w-full h-12 bg-yellow-400 top-1/2 -translate-y-1/2"></div>
+                    <div className="absolute h-full w-12 bg-yellow-400 left-1/2 -translate-x-1/2"></div>
+                    <span className="text-6xl z-10">🎁</span>
+                  </div>
                 </div>
-                <button onClick={resetGuest} className="mt-12 text-xs text-red-300 underline">Start Over</button>
               </div>
             );
           }
 
-          return (
-            <div className="h-screen flex flex-col items-center justify-center p-4 text-center">
-              <h1 className="font-fun text-5xl text-red-600 mb-2">Secret Santa</h1>
-              <p className="text-pink-400 font-bold uppercase tracking-widest mb-8">You have a match!</p>
-              <button onClick={startReveal} className="w-72 h-72 rounded-full bg-red-500 shadow-[0_10px_0_#9f1239] flex flex-col items-center justify-center text-white border-8 border-white hover:scale-105 transition active:translate-y-2 active:shadow-none cursor-pointer">
-                <div className="text-7xl animate-bounce mb-2">🎁</div>
-                <span className="font-fun text-4xl">OPEN ME!</span>
-              </button>
-            </div>
-          );
+          if (phase === 'COUNTDOWN') {
+            return (
+              <div className="h-screen flex items-center justify-center bg-red-600">
+                <h1 className="font-fun text-[12rem] text-white animate-ping">{count}</h1>
+              </div>
+            );
+          }
+
+          if (phase === 'CARD') {
+            return (
+              <div className="h-screen flex flex-col items-center justify-center p-4 bg-red-50 text-center animate-pop">
+                <div className="snow-card w-full max-w-sm p-8 border-t-8 border-green-500 relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-full h-24 bg-green-100 opacity-50 z-0"></div>
+                  <div className="relative z-10">
+                    <p className="text-sm font-bold text-green-700 uppercase tracking-widest mb-6">Your Secret Mission</p>
+                    <div className="text-5xl font-fun text-red-600 mb-8 drop-shadow-sm">{myMatch.name}</div>
+                    
+                    <div className="bg-yellow-50 p-6 rounded-2xl border-2 border-yellow-200 text-yellow-900 shadow-inner transform rotate-1">
+                      <p className="text-xs font-bold uppercase opacity-60 mb-2">They asked for</p>
+                      <p className="text-2xl font-bold font-fun">"{myMatch.wish}"</p>
+                    </div>
+                    
+                    <p className="text-xs text-gray-400 mt-8 font-bold animate-pulse">📸 Screenshot before it disappears!</p>
+                  </div>
+                </div>
+                <button onClick={() => window.location.href = window.location.pathname} className="mt-8 text-red-300 underline">Exit</button>
+              </div>
+            );
+          }
         }
 
         return null;
