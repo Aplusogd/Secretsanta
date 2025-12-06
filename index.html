@@ -4,281 +4,217 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Santa's Party 🎄</title>
-    
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
-    
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Chewy&family=Quicksand:wght@500;700&display=swap');
-      
-      body {
-        font-family: 'Quicksand', sans-serif;
-        background-color: #f0fdf4;
-        color: #14532d;
-        min-height: 100vh;
-        overflow: hidden;
-      }
-      
+      body { font-family: 'Quicksand', sans-serif; background-color: #f0fdf4; color: #14532d; min-height: 100vh; overflow: hidden; touch-action: manipulation; }
       .font-fun { font-family: 'Chewy', cursive; }
-      
-      .btn-action {
-        background: #ef4444;
-        color: white;
-        font-family: 'Chewy', cursive;
-        font-size: 1.5rem;
-        padding: 1rem;
-        border-radius: 1rem;
-        box-shadow: 0 4px 0 #991b1b;
-        transition: all 0.1s;
-        width: 100%;
-      }
+      .btn-action { background: #ef4444; color: white; font-family: 'Chewy', cursive; font-size: 1.5rem; padding: 1rem; border-radius: 1rem; box-shadow: 0 4px 0 #991b1b; width: 100%; transition: all 0.1s; }
       .btn-action:active { transform: translateY(4px); box-shadow: none; }
       .btn-action:disabled { background: #d1d5db; box-shadow: none; cursor: not-allowed; }
-
       .animate-pop { animation: pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
       @keyframes pop { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-      
+      .scroller { -webkit-overflow-scrolling: touch; }
       .scroller::-webkit-scrollbar { width: 4px; }
-      .scroller::-webkit-scrollbar-track { background: #f0fdf4; }
       .scroller::-webkit-scrollbar-thumb { background: #86efac; border-radius: 10px; }
     </style>
   </head>
   <body>
     <div id="root"></div>
-
     <script type="text/babel">
       const { useState, useEffect, useRef } = React;
 
       // --- HELPERS ---
-      // Deterministic ID generation to ensure Host stays Host even after refresh
-      const getHostId = (code) => `santa-app-host-${code}`;
+      const getHostId = (code) => `santa-host-${code}`;
 
       // --- MAIN APP ---
       const App = () => {
-        const [view, setView] = useState('HOME'); 
+        const [view, setView] = useState('HOME');
         const [status, setStatus] = useState("");
         
-        // Host Data
+        // Host State
         const [roomCode, setRoomCode] = useState("");
         const [players, setPlayers] = useState([]);
-        const [isShuffling, setIsShuffling] = useState(false);
-        const [matches, setMatches] = useState(null); // Store pairings to allow re-sending
+        const [mailbox, setMailbox] = useState({}); // { guestId: { name, wish } }
         
-        // Guest Data
+        // Guest State
+        const [myId, setMyId] = useState("");
         const [guestName, setGuestName] = useState("");
         const [guestWish, setGuestWish] = useState("");
         const [myMatch, setMyMatch] = useState(null);
         
-        // PeerJS Refs
         const peerRef = useRef(null);
-        const connMapRef = useRef(new Map()); // Map player ID to connection object
+        const pollTimer = useRef(null);
 
-        // 1. INITIALIZE FROM URL
+        // 1. INIT
         useEffect(() => {
           const params = new URLSearchParams(window.location.search);
           const partyCode = params.get('party');
-          
           if (partyCode) {
             setRoomCode(partyCode);
             setView('GUEST_JOIN');
           }
         }, []);
 
-        // --- HOST FUNCTIONS ---
+        // --- HOST LOGIC ---
         const startHosting = () => {
-          const code = Math.floor(1000 + Math.random() * 9000).toString(); // Simple 4-digit code
+          const code = Math.floor(1000 + Math.random() * 9000).toString();
           setRoomCode(code);
           setView('HOST_LOBBY');
-          setStatus("Initializing Party Network...");
+          setStatus("Starting Server...");
 
-          // Clean up old
           if (peerRef.current) peerRef.current.destroy();
-
-          // Create Host with Specific ID
+          
           const peer = new Peer(getHostId(code), { debug: 1 });
           peerRef.current = peer;
 
-          peer.on('open', (id) => {
-            console.log("Host Online:", id);
-            setStatus("Online & Listening");
-          });
+          peer.on('open', () => setStatus("Online - Waiting for Elves"));
 
           peer.on('connection', (conn) => {
-            conn.on('open', () => {
-              // Ask for guest info
-              conn.send({ type: 'WHO_ARE_YOU' });
-            });
-
             conn.on('data', (data) => {
-              if (data.type === 'I_AM') {
+              // 1. Player Joining
+              if (data.type === 'JOIN') {
                 setPlayers(prev => {
                   const exists = prev.find(p => p.id === data.id);
                   if (exists) return prev;
                   return [...prev, { id: data.id, name: data.name, wish: data.wish }];
                 });
-                // Store connection for later sending
-                connMapRef.current.set(data.id, conn);
                 conn.send({ type: 'WELCOME' });
               }
-            });
-
-            conn.on('close', () => {
-              // Optional: Remove player or keep them as "offline"
-              // Keeping them allows them to reconnect without breaking shuffle logic
+              // 2. Player Checking Mail
+              if (data.type === 'CHECK_MAIL') {
+                // Look in mailbox for this player ID
+                // We use a ref or read state directly. Since setState is async, we trust 'mailbox' state here.
+                // However, inside event listener, state might be stale. We use functional update or ref.
+                // Simpler: Just rely on the players list index for matching logic if needed, but here we used mailbox state.
+                // FIX: To access latest mailbox state inside listener, we need a ref or useEffect logic.
+                // SIMPLIFICATION: We will broadcast match immediately upon check if available.
+                
+                // Hack: We need to read the *current* mailbox. 
+                // We will emit an event that React effect picks up, or just use a ref for mailbox.
+                const mail = mailboxRef.current[data.id]; 
+                if (mail) {
+                  conn.send({ type: 'MATCH_FOUND', match: mail });
+                } else {
+                  conn.send({ type: 'NO_MAIL_YET' });
+                }
+              }
             });
           });
-
+          
           peer.on('error', (err) => {
-            console.error(err);
-            setStatus("Network Error: " + err.type);
-            // Auto-recover for ID unavailable (means we refreshed)
-            if (err.type === 'unavailable-id') {
-               setStatus("Recovering Session...");
-               // In a real app we'd need more logic here, but for now simple error is safer
-            }
+             if(err.type === 'unavailable-id') alert("Code taken! Refreshing...");
           });
         };
 
-        const performShuffle = () => {
-          if (players.length < 2) return alert("Need 2+ players!");
-          setIsShuffling(true);
-
-          setTimeout(() => {
-            let shuffled = [...players];
-            let valid = false;
-            
-            // Derangement Logic
-            for(let k=0; k<200; k++) {
-              for(let i=shuffled.length-1; i>0; i--) {
-                const j = Math.floor(Math.random()*(i+1));
-                [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-              }
-              valid = true;
-              for(let i=0; i<players.length; i++) {
-                if (players[i].id === shuffled[i].id) { valid = false; break; }
-              }
-              if(valid) break;
+        // Use Ref for Mailbox so PeerJS listener can see it instantly
+        const mailboxRef = useRef({});
+        
+        const shuffle = () => {
+          if (players.length < 2) return alert("Need 2+ people!");
+          
+          let shuffled = [...players];
+          let valid = false;
+          
+          for(let k=0; k<200; k++) {
+            // Fisher-Yates
+            for(let i=shuffled.length-1; i>0; i--) {
+              const j = Math.floor(Math.random()*(i+1));
+              [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
             }
-
-            if(!valid) {
-              setIsShuffling(false);
-              return alert("Shuffle failed. Add more people!");
+            valid = true;
+            for(let i=0; i<players.length; i++) {
+              if (players[i].id === shuffled[i].id) { valid = false; break; }
             }
+            if(valid) break;
+          }
 
-            // Create Match Map
-            const newMatches = {};
-            players.forEach((p, i) => {
-              newMatches[p.id] = shuffled[i];
-            });
-            setMatches(newMatches);
-            
-            distributeMatches(newMatches);
-            setIsShuffling(false);
-          }, 1500); // Visual delay
-        };
+          if(!valid) return alert("Shuffle failed. Add more people!");
 
-        const distributeMatches = (matchData) => {
-          let sentCount = 0;
-          players.forEach(p => {
-            const match = matchData[p.id];
-            const conn = connMapRef.current.get(p.id);
-            
-            if (conn && conn.open) {
-              conn.send({ type: 'MATCH', match: match });
-              sentCount++;
-            }
+          // Fill Mailbox
+          const newMail = {};
+          players.forEach((p, i) => {
+            newMail[p.id] = shuffled[i];
           });
-          alert(`Sent to ${sentCount} active connections! If anyone missed it, press 'Resend'.`);
+          
+          setMailbox(newMail);
+          mailboxRef.current = newMail; // Sync Ref
+          
+          alert("Matches Generated! Guests will receive them automatically in a few seconds.");
         };
 
-        const handleResend = () => {
-          if (!matches) return;
-          distributeMatches(matches);
-        };
-
-        // --- GUEST FUNCTIONS ---
+        // --- GUEST LOGIC ---
         const joinGame = (e) => {
           e.preventDefault();
-          if (!guestName || !guestWish) return alert("Please fill it out!");
+          if (!guestName || !guestWish) return alert("Fill it out!");
           
+          const id = 'guest-' + Math.random().toString(36).substr(2, 9);
+          setMyId(id);
           setView('GUEST_WAITING');
-          setStatus("Searching for Party...");
+          setStatus("Connecting...");
           
-          connectToHost();
+          connectAndPoll(id);
         };
 
-        const connectToHost = () => {
-          const guestId = 'guest-' + Math.random().toString(36).substr(2, 9);
-          const peer = new Peer(guestId, { debug: 1 });
+        const connectAndPoll = (id) => {
+          const peer = new Peer(id, { debug: 1 });
           peerRef.current = peer;
 
           peer.on('open', () => {
             const conn = peer.connect(getHostId(roomCode));
             
             conn.on('open', () => {
-              setStatus("Connected! Waiting...");
+              setStatus("Connected!");
+              conn.send({ type: 'JOIN', id: id, name: guestName, wish: guestWish });
+              
+              // START POLLING
+              if (pollTimer.current) clearInterval(pollTimer.current);
+              pollTimer.current = setInterval(() => {
+                conn.send({ type: 'CHECK_MAIL', id: id });
+              }, 2000); // Ask every 2 seconds
             });
 
             conn.on('data', (data) => {
-              if (data.type === 'WHO_ARE_YOU') {
-                conn.send({ type: 'I_AM', id: guestId, name: guestName, wish: guestWish });
-              }
-              if (data.type === 'WELCOME') {
-                setStatus("Joined! Waiting for Shuffle...");
-              }
-              if (data.type === 'MATCH') {
+              if (data.type === 'MATCH_FOUND') {
+                clearInterval(pollTimer.current); // Stop asking
                 setMyMatch(data.match);
                 setView('GUEST_REVEAL');
                 window.confetti();
               }
+              if (data.type === 'WELCOME') {
+                setStatus("Joined! Waiting for Shuffle...");
+              }
             });
-
-            conn.on('close', () => setStatus("Disconnected from Host. Refreshing..."));
-            conn.on('error', () => {
-               setStatus("Connection lost. Retrying...");
-               setTimeout(connectToHost, 2000);
-            });
+            
+            conn.on('close', () => setStatus("Host Disconnected. Reconnecting..."));
+            conn.on('error', () => setTimeout(() => connectAndPoll(id), 2000));
           });
-
+          
           peer.on('error', (err) => {
-            setStatus("Can't find host. Is the code right?");
-            setTimeout(connectToHost, 3000); // Auto Retry
+             setStatus("Looking for Host...");
+             setTimeout(() => connectAndPoll(id), 2000);
           });
         };
 
         // --- VIEWS ---
 
-        // 1. HOME SCREEN
+        // 1. HOME
         if (view === 'HOME') {
           return (
             <div className="h-screen flex items-center justify-center p-4">
               <div className="bg-white border-4 border-green-200 rounded-3xl p-8 w-full max-w-sm text-center shadow-xl animate-pop">
                 <div className="text-6xl mb-4">🎅</div>
                 <h1 className="font-fun text-5xl text-red-600 mb-6">Secret Santa</h1>
-                
-                <button onClick={startHosting} className="btn-action bg-green-500 shadow-[0_4px_0_#15803d]">
-                  Start Party (Host)
-                </button>
-                
-                <div className="my-4 flex items-center gap-2">
-                  <div className="h-0.5 bg-gray-200 flex-1"></div>
-                  <span className="text-xs font-bold text-gray-400">OR</span>
-                  <div className="h-0.5 bg-gray-200 flex-1"></div>
-                </div>
-
+                <button onClick={startHosting} className="btn-action bg-green-500 shadow-[0_4px_0_#15803d]">Start Party (Host)</button>
+                <div className="my-4 text-xs font-bold text-gray-400">OR JOIN</div>
                 <form onSubmit={(e) => { e.preventDefault(); setView('GUEST_JOIN'); }} className="flex gap-2">
-                  <input 
-                    value={roomCode} onChange={e => setRoomCode(e.target.value)} 
-                    className="w-20 text-center font-bold text-xl border-2 border-gray-200 rounded-lg p-2 outline-none focus:border-green-500"
-                    placeholder="1234" maxLength={4}
-                  />
-                  <button className="flex-1 bg-white border-2 border-green-500 text-green-600 font-bold rounded-lg hover:bg-green-50">
-                    Join Party
-                  </button>
+                  <input value={roomCode} onChange={e => setRoomCode(e.target.value)} className="w-20 text-center font-bold text-xl border-2 border-gray-200 rounded-lg p-2 outline-none focus:border-green-500" placeholder="1234" maxLength={4} />
+                  <button className="flex-1 bg-white border-2 border-green-500 text-green-600 font-bold rounded-lg">Join</button>
                 </form>
               </div>
             </div>
@@ -290,52 +226,24 @@
           const shareUrl = `${window.location.origin}${window.location.pathname}?party=${roomCode}`;
           return (
             <div className="flex flex-col h-screen bg-green-50">
-              {/* Header */}
               <div className="bg-white p-4 shadow-sm border-b border-green-100 text-center z-10">
-                <div className="inline-block bg-yellow-100 text-yellow-800 font-bold px-4 py-1 rounded-full border border-yellow-300 mb-2">
-                  Room Code: {roomCode}
-                </div>
-                <div className="text-xs text-gray-400 font-mono mb-2">{status}</div>
-                <button onClick={() => { navigator.clipboard.writeText(shareUrl); alert("Copied!"); }} className="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-lg font-bold text-gray-600">
-                  🔗 Copy Link
-                </button>
+                <div className="inline-block bg-yellow-100 text-yellow-800 font-bold px-4 py-1 rounded-full border border-yellow-300 mb-2">Room: {roomCode}</div>
+                <button onClick={() => { navigator.clipboard.writeText(shareUrl); alert("Copied!"); }} className="text-xs bg-gray-100 px-3 py-1 rounded-lg font-bold text-gray-600">🔗 Copy Link</button>
               </div>
-
-              {/* List */}
               <div className="flex-1 overflow-y-auto p-4 scroller">
-                <h3 className="font-bold text-green-800 mb-2 ml-1">Elves Joined ({players.length})</h3>
+                <h3 className="font-bold text-green-800 mb-2 ml-1">Elves: {players.length}</h3>
                 <div className="space-y-2 pb-24">
                   {players.map(p => (
                     <div key={p.id} className="bg-white p-3 rounded-xl border border-green-200 shadow-sm flex items-center justify-between animate-pop">
-                      <div>
-                        <div className="font-bold text-gray-800">{p.name}</div>
-                        <div className="text-xs text-gray-500">{p.wish}</div>
-                      </div>
+                      <div><div className="font-bold text-gray-800">{p.name}</div><div className="text-xs text-gray-500">{p.wish}</div></div>
                       <div className="text-2xl">🧝</div>
                     </div>
                   ))}
-                  {players.length === 0 && (
-                    <div className="text-center py-10 text-gray-400 italic">Waiting for elves...</div>
-                  )}
+                  {players.length === 0 && <div className="text-center py-10 text-gray-400 italic">Waiting for elves...</div>}
                 </div>
               </div>
-
-              {/* Footer Controls */}
               <div className="bg-white p-4 border-t border-green-100 shadow-lg shrink-0">
-                {!matches ? (
-                  <button onClick={performShuffle} disabled={players.length < 2 || isShuffling} className="btn-action">
-                    {isShuffling ? "Mixing..." : "Shuffle & Send 🎁"}
-                  </button>
-                ) : (
-                  <div className="flex gap-2">
-                    <button onClick={handleResend} className="flex-1 bg-yellow-500 text-white font-bold py-3 rounded-xl shadow-[0_4px_0_#b45309] active:translate-y-1 active:shadow-none">
-                      Resend Matches ↻
-                    </button>
-                    <button onClick={() => { if(confirm("New Game?")) setMatches(null); }} className="flex-1 bg-gray-200 text-gray-600 font-bold py-3 rounded-xl">
-                      Reset
-                    </button>
-                  </div>
-                )}
+                <button onClick={shuffle} disabled={players.length < 2} className="btn-action">{Object.keys(mailbox).length > 0 ? "Resend Matches ↻" : "Shuffle & Send 🎁"}</button>
               </div>
             </div>
           );
@@ -346,19 +254,10 @@
           return (
             <div className="h-screen flex items-center justify-center p-4">
               <div className="bg-white border-4 border-red-200 rounded-3xl p-8 w-full max-w-sm animate-pop">
-                <div className="text-center mb-6">
-                  <span className="bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded">ROOM {roomCode}</span>
-                  <h1 className="font-fun text-4xl text-green-700 mt-2">Join In!</h1>
-                </div>
+                <div className="text-center mb-6"><span className="bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded">ROOM {roomCode}</span><h1 className="font-fun text-4xl text-green-700 mt-2">Join In!</h1></div>
                 <form onSubmit={joinGame} className="space-y-4">
-                  <div>
-                    <label className="text-xs font-bold text-gray-400 uppercase">My Name</label>
-                    <input value={guestName} onChange={e => setGuestName(e.target.value)} className="w-full p-3 border-2 border-green-100 rounded-lg outline-none focus:border-green-500 font-bold" placeholder="e.g. Buddy" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-gray-400 uppercase">Wishlist</label>
-                    <input value={guestWish} onChange={e => setGuestWish(e.target.value)} className="w-full p-3 border-2 border-green-100 rounded-lg outline-none focus:border-green-500" placeholder="e.g. Socks" />
-                  </div>
+                  <div><label className="text-xs font-bold text-gray-400 uppercase">Name</label><input value={guestName} onChange={e => setGuestName(e.target.value)} className="w-full p-3 border-2 border-green-100 rounded-lg outline-none focus:border-green-500 font-bold" placeholder="Buddy" /></div>
+                  <div><label className="text-xs font-bold text-gray-400 uppercase">Wish</label><input value={guestWish} onChange={e => setGuestWish(e.target.value)} className="w-full p-3 border-2 border-green-100 rounded-lg outline-none focus:border-green-500" placeholder="Socks" /></div>
                   <button className="btn-action bg-green-500 shadow-[0_4px_0_#15803d]">I'm Ready!</button>
                 </form>
               </div>
@@ -369,13 +268,11 @@
         // 4. GUEST WAITING
         if (view === 'GUEST_WAITING') {
           return (
-            <div className="h-screen flex flex-col items-center justify-center p-6 text-center bg-green-50">
-              <div className="text-6xl animate-bounce mb-4">🎄</div>
+            <div className="h-screen flex flex-col items-center justify-center p-6 text-center bg-green-50 animate-pop">
+              <div className="text-6xl animate-bounce mb-4">🎅</div>
               <h2 className="font-fun text-4xl text-green-700 mb-2">You're In!</h2>
               <p className="text-gray-600 mb-8 font-medium">{status}</p>
-              <div className="bg-white p-4 rounded-xl border border-green-200 text-sm text-gray-500 shadow-sm max-w-xs">
-                Don't close this screen! Wait for the host to send the gifts.
-              </div>
+              <div className="bg-white p-4 rounded-xl border border-green-200 text-sm text-gray-500 shadow-sm max-w-xs">Do not close this screen! Checking for matches automatically...</div>
             </div>
           );
         }
@@ -383,33 +280,26 @@
         // 5. GUEST REVEAL
         if (view === 'GUEST_REVEAL') {
           const [isOpen, setIsOpen] = useState(false);
-          
           return (
             <div className="h-screen flex flex-col items-center justify-center p-4 text-center bg-red-50">
               <h1 className="font-fun text-5xl text-red-600 mb-2">It's Here!</h1>
-              
               {!isOpen ? (
                 <div onClick={() => { setIsOpen(true); window.confetti({ particleCount: 200, spread: 100 }); }} className="cursor-pointer mt-8 transition transform hover:scale-105 active:scale-95">
                   <div className="w-64 h-64 bg-red-500 rounded-3xl shadow-xl border-4 border-white flex items-center justify-center relative">
                     <div className="absolute inset-x-0 h-8 bg-yellow-400 top-1/2 -translate-y-1/2"></div>
                     <div className="absolute inset-y-0 w-8 bg-yellow-400 left-1/2 -translate-x-1/2"></div>
-                    <div className="z-10 text-white font-fun text-3xl drop-shadow-md">OPEN ME</div>
+                    <div className="z-10 text-white font-fun text-3xl drop-shadow-md">TAP ME</div>
                   </div>
-                  <p className="mt-4 text-red-400 font-bold animate-pulse">Tap the gift!</p>
                 </div>
               ) : (
                 <div className="bg-white border-4 border-green-400 rounded-3xl p-8 w-full max-w-sm shadow-2xl animate-pop relative overflow-hidden">
                   <div className="absolute top-0 left-0 w-full h-4 bg-red-500"></div>
-                  <div className="absolute bottom-0 left-0 w-full h-4 bg-red-500"></div>
-                  
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Your Secret Mission</p>
                   <div className="text-5xl font-fun text-green-700 mb-6">{myMatch.name}</div>
-                  
                   <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-yellow-900 shadow-inner">
                     <p className="text-xs font-bold uppercase opacity-50 mb-1">They Wished For</p>
                     <p className="text-xl font-bold">"{myMatch.wish}"</p>
                   </div>
-                  
                   <p className="text-xs text-red-400 mt-6 font-bold animate-pulse">📸 SCREENSHOT THIS!</p>
                 </div>
               )}
